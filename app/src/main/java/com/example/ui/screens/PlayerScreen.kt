@@ -1,6 +1,14 @@
 package com.example.ui.screens
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
+import android.view.View
+import android.webkit.WebChromeClient
+import android.webkit.WebChromeClient.CustomViewCallback
+import android.widget.FrameLayout
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,16 +26,30 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.example.data.CompactMedia
 import com.example.viewmodel.MovieHubViewModel
 import com.example.ui.components.*
 import com.example.ui.theme.*
+
+private fun Context.findActivity(): Activity? {
+    var context = this
+    while (context is ContextWrapper) {
+        if (context is Activity) return context
+        context = context.baseContext
+    }
+    return context as? Activity
+}
 
 data class StreamingServer(
     val name: String,
@@ -144,49 +166,84 @@ fun PlayerScreen(
     val activeServer = streamingServers.getOrElse(activeServerIndex) { streamingServers.first() }
     val embedUrl = buildEmbedUrl(activeServer, id, isTv, currentSeason, currentEpisode)
 
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+
+    // Enable landscape screen rotation loaded effect
+    DisposableEffect(Unit) {
+        val activity = context.findActivity()
+        val originalOrientation = activity?.requestedOrientation
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        onDispose {
+            activity?.requestedOrientation = originalOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
+    // Modern SystemBars Edge-To-Edge toggle for full-screen landscape
+    LaunchedEffect(isLandscape) {
+        val activity = context.findActivity()
+        val window = activity?.window
+        if (window != null) {
+            val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+            if (isLandscape) {
+                insetsController.hide(WindowInsetsCompat.Type.systemBars())
+                insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            } else {
+                insetsController.show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = if (isTv) "$mediaTitle (S${currentSeason}E${currentEpisode})" else mediaTitle,
-                        color = TextWhite,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "Go Back",
-                            tint = TextWhite
+            if (!isLandscape) {
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = if (isTv) "$mediaTitle (S${currentSeason}E${currentEpisode})" else mediaTitle,
+                            color = TextWhite,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = NearBlack,
-                    titleContentColor = TextWhite
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBackClick) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowBack,
+                                contentDescription = "Go Back",
+                                tint = TextWhite
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = NearBlack,
+                        titleContentColor = TextWhite
+                    )
                 )
-            )
+            }
         },
         modifier = modifier.fillMaxSize()
     ) { innerPadding ->
+        val scrollState = rememberScrollState()
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(NearBlack)
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
+                .padding(if (isLandscape) PaddingValues(0.dp) else innerPadding)
         ) {
             // --- VIDEO VIEWER VIEW ---
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1.77f) // 16:9
-                    .background(Color.Black)
+                modifier = if (isLandscape) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1.77f) // 16:9
+                }
+                .background(Color.Black)
             ) {
                 androidx.compose.ui.viewinterop.AndroidView(
                     factory = { ctx ->
@@ -199,7 +256,39 @@ fun PlayerScreen(
                                 useWideViewPort = true
                             }
                             webViewClient = android.webkit.WebViewClient()
-                            webChromeClient = android.webkit.WebChromeClient()
+                            webChromeClient = object : android.webkit.WebChromeClient() {
+                                private var customView: View? = null
+                                private var customViewCallback: CustomViewCallback? = null
+
+                                override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                                    super.onShowCustomView(view, callback)
+                                    if (customView != null) {
+                                        onHideCustomView()
+                                        return
+                                    }
+                                    customView = view
+                                    customViewCallback = callback
+                                    
+                                    val activity = ctx.findActivity()
+                                    val decorView = activity?.window?.decorView as? FrameLayout
+                                    decorView?.addView(customView, FrameLayout.LayoutParams(
+                                        FrameLayout.LayoutParams.MATCH_PARENT,
+                                        FrameLayout.LayoutParams.MATCH_PARENT
+                                    ))
+                                }
+
+                                override fun onHideCustomView() {
+                                    super.onHideCustomView()
+                                    if (customView == null) return
+                                    
+                                    val activity = ctx.findActivity()
+                                    val decorView = activity?.window?.decorView as? FrameLayout
+                                    decorView?.removeView(customView)
+                                    customView = null
+                                    customViewCallback?.onCustomViewHidden()
+                                    customViewCallback = null
+                                }
+                            }
                             loadUrl(embedUrl)
                         }
                     },
@@ -212,196 +301,205 @@ fun PlayerScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // --- INFO BANNER TIP ---
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(SurfaceDark)
-                    .border(1.dp, SurfaceVariantDark, RoundedCornerShape(8.dp))
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = "Info Tip",
-                    tint = AmberGold,
-                    modifier = Modifier.size(24.dp)
-                )
-                Text(
-                    text = "If the stream is slow or not loading, switch to a backup server. TV URLs reload automatically on picker change.",
-                    color = TextGray,
-                    fontSize = 12.sp,
-                    lineHeight = 18.sp,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // --- TV EPISODES PICKER (SWIFT EPISODE NAV WITHIN PLAYER) ---
-            if (isTv && tvDetail != null) {
+            if (!isLandscape) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .background(SurfaceDark, RoundedCornerShape(12.dp))
-                        .padding(16.dp)
+                        .weight(1f)
+                        .verticalScroll(scrollState)
                 ) {
-                    Text(
-                        text = "Next Episode Quick Link",
-                        color = TextWhite,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                    Text("Season", color = TextGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(4.dp))
+                    // --- INFO BANNER TIP ---
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            .padding(horizontal = 16.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(SurfaceDark)
+                            .border(1.dp, SurfaceVariantDark, RoundedCornerShape(8.dp))
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        repeat(tvDetail?.number_of_seasons ?: 1) { index ->
-                            val sNum = index + 1
-                            val isSelected = currentSeason == sNum
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSelected) AmberGold else SurfaceVariantDark)
-                                    .clickable {
-                                        currentSeason = sNum
-                                        currentEpisode = 1 // Reset episode on season swap
-                                    }
-                                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = "S$sNum",
-                                    color = if (isSelected) NearBlack else TextWhite,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Info Tip",
+                            tint = AmberGold,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Text(
+                            text = "If the stream is slow or not loading, switch to a backup server. TV URLs reload automatically on picker change.",
+                            color = TextGray,
+                            fontSize = 12.sp,
+                            lineHeight = 18.sp,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                    Text("Episode", color = TextGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        repeat(maxEpisodes) { index ->
-                            val eNum = index + 1
-                            val isSelected = currentEpisode == eNum
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSelected) AmberGold else SurfaceVariantDark)
-                                    .clickable { currentEpisode = eNum }
-                                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = "E$eNum",
-                                    color = if (isSelected) NearBlack else TextWhite,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-
-            // --- SERVERS SELECTOR HEADER ---
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-            ) {
-                Text(
-                    text = "Backup Stream Servers",
-                    color = TextWhite,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Scrollable chip selector
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    streamingServers.forEachIndexed { index, server ->
-                        val isSelected = activeServerIndex == index
-                        Box(
+                    // --- TV EPISODES PICKER (SWIFT EPISODE NAV WITHIN PLAYER) ---
+                    if (isTv && tvDetail != null) {
+                        Column(
                             modifier = Modifier
-                                .width(200.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isSelected) SurfaceVariantDark else SurfaceDark)
-                                .border(
-                                    1.dp,
-                                    if (isSelected) AmberGold else SurfaceVariantDark,
-                                    RoundedCornerShape(12.dp)
-                                )
-                                .testTag("server_chip_$index")
-                                .clickable { viewModel.selectServer(index) }
-                                .padding(12.dp)
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                                .background(SurfaceDark, RoundedCornerShape(12.dp))
+                                .padding(16.dp)
                         ) {
-                            Column {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        text = server.name,
-                                        color = if (isSelected) AmberGold else TextWhite,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp
-                                    )
-                                    if (isSelected) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            PulseLiveDot()
-                                            Text(
-                                                text = "Live",
-                                                color = Color(0xFF22C55E),
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 10.sp
-                                            )
-                                        }
+                            Text(
+                                text = "Next Episode Quick Link",
+                                color = TextWhite,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text("Season", color = TextGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                repeat(tvDetail?.number_of_seasons ?: 1) { index ->
+                                    val sNum = index + 1
+                                    val isSelected = currentSeason == sNum
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isSelected) AmberGold else SurfaceVariantDark)
+                                            .clickable {
+                                                currentSeason = sNum
+                                                currentEpisode = 1 // Reset episode on season swap
+                                            }
+                                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            text = "S$sNum",
+                                            color = if (isSelected) NearBlack else TextWhite,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                 }
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = server.description,
-                                    color = TextGray,
-                                    fontSize = 11.sp,
-                                    textAlign = TextAlign.Start
-                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text("Episode", color = TextGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                repeat(maxEpisodes) { index ->
+                                    val eNum = index + 1
+                                    val isSelected = currentEpisode == eNum
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isSelected) AmberGold else SurfaceVariantDark)
+                                            .clickable { currentEpisode = eNum }
+                                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            text = "E$eNum",
+                                            color = if (isSelected) NearBlack else TextWhite,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
+
+                    // --- SERVERS SELECTOR HEADER ---
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        Text(
+                            text = "Backup Stream Servers",
+                            color = TextWhite,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Scrollable chip selector
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            streamingServers.forEachIndexed { index, server ->
+                                val isSelected = activeServerIndex == index
+                                Box(
+                                    modifier = Modifier
+                                        .width(200.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (isSelected) SurfaceVariantDark else SurfaceDark)
+                                        .border(
+                                            1.dp,
+                                            if (isSelected) AmberGold else SurfaceVariantDark,
+                                            RoundedCornerShape(12.dp)
+                                        )
+                                        .testTag("server_chip_$index")
+                                        .clickable { viewModel.selectServer(index) }
+                                        .padding(12.dp)
+                                ) {
+                                    Column {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text(
+                                                text = server.name,
+                                                color = if (isSelected) AmberGold else TextWhite,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp
+                                            )
+                                            if (isSelected) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    PulseLiveDot()
+                                                    Text(
+                                                        text = "Live",
+                                                        color = Color(0xFF22C55E),
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 10.sp
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = server.description,
+                                            color = TextGray,
+                                            fontSize = 11.sp,
+                                            textAlign = TextAlign.Start
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
+                    Spacer(modifier = Modifier.height(30.dp))
                 }
             }
-            Spacer(modifier = Modifier.height(30.dp))
         }
     }
 }
