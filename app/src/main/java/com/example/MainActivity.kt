@@ -144,13 +144,14 @@ fun MovieHubApp() {
             }
         }
     ) { innerPadding ->
+        val isWatchRoute = currentRoute?.startsWith("watch") == true
         NavHost(
             navController = navController,
             startDestination = Routes.HOME,
             modifier = Modifier
                 .fillMaxSize()
                 .background(NearBlack)
-                .padding(innerPadding)
+                .padding(if (isWatchRoute) PaddingValues(0.dp) else innerPadding)
         ) {
             composable(Routes.HOME) {
                 HomeScreen(

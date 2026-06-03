@@ -15,6 +15,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -22,6 +23,8 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,8 +71,8 @@ val streamingServers = listOf(
     StreamingServer(
         "VidLink",
         "Fast Stream",
-        "https://vidlink.pro/movie/{id}?primaryColor=f59e0b",
-        "https://vidlink.pro/tv/{id}/{s}/{e}?primaryColor=f59e0b"
+        "https://vidlink.pro/embed/movie/{id}?primaryColor=f59e0b",
+        "https://vidlink.pro/embed/tv/{id}/{s}/{e}?primaryColor=f59e0b"
     ),
     StreamingServer(
         "VidSrc.to",
@@ -78,22 +81,22 @@ val streamingServers = listOf(
         "https://vidsrc.to/embed/tv/{id}/{s}/{e}"
     ),
     StreamingServer(
-        "VidSrc.xyz",
-        "Multi-Server",
-        "https://vidsrc.xyz/embed/movie/{id}",
-        "https://vidsrc.xyz/embed/tv/{id}/{s}/{e}"
-    ),
-    StreamingServer(
         "VidSrc.me",
         "Classic Server",
         "https://vidsrc.me/embed/movie?tmdb={id}",
         "https://vidsrc.me/embed/tv?tmdb={id}&season={s}&episode={e}"
     ),
     StreamingServer(
+        "VidSrc.xyz",
+        "Multi-Server",
+        "https://vidsrc.xyz/embed/movie/{id}",
+        "https://vidsrc.xyz/embed/tv/{id}/{s}/{e}"
+    ),
+    StreamingServer(
         "VidSrc.cc",
         "Alternative Backup",
-        "https://vidsrc.cc/v2/embed/movie/{id}",
-        "https://vidsrc.cc/v2/embed/tv/{id}/{s}/{e}"
+        "https://vidsrc.cc/v3/embed/movie/{id}",
+        "https://vidsrc.cc/v3/embed/tv/{id}/{s}/{e}"
     ),
     StreamingServer(
         "Embed.su",
@@ -170,23 +173,41 @@ fun PlayerScreen(
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
 
-    // Enable landscape screen rotation loaded effect
-    DisposableEffect(Unit) {
-        val activity = context.findActivity()
-        val originalOrientation = activity?.requestedOrientation
-        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        onDispose {
-            activity?.requestedOrientation = originalOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    // State-Based Layout for Full Screen Experience (remembers layout across rotation-induced recreations)
+    var isFullScreen by rememberSaveable { mutableStateOf(false) }
+
+    // Intercept native Back Gestures to exit full screen smoothly
+    BackHandler(enabled = isFullScreen) {
+        if (isFullScreen) {
+            isFullScreen = false
         }
     }
 
-    // Modern SystemBars Edge-To-Edge toggle for full-screen landscape
-    LaunchedEffect(isLandscape) {
+    // Dynamic Orientation Control based on isFullScreen state
+    LaunchedEffect(isFullScreen) {
+        val activity = context.findActivity()
+        if (isFullScreen) {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        } else {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
+    // Safely restore normal portrait orientation when leaving PlayerScreen to ensure all other screens display vertically
+    DisposableEffect(Unit) {
+        onDispose {
+            val activity = context.findActivity()
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+    }
+
+    // Modern SystemBars Edge-To-Edge toggle for immersive playback
+    LaunchedEffect(isFullScreen) {
         val activity = context.findActivity()
         val window = activity?.window
         if (window != null) {
             val insetsController = WindowCompat.getInsetsController(window, window.decorView)
-            if (isLandscape) {
+            if (isFullScreen) {
                 insetsController.hide(WindowInsetsCompat.Type.systemBars())
                 insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             } else {
@@ -197,7 +218,7 @@ fun PlayerScreen(
 
     Scaffold(
         topBar = {
-            if (!isLandscape) {
+            if (!isFullScreen) {
                 TopAppBar(
                     title = {
                         Text(
@@ -210,7 +231,11 @@ fun PlayerScreen(
                         )
                     },
                     navigationIcon = {
-                        IconButton(onClick = onBackClick) {
+                        IconButton(onClick = {
+                            val activity = context.findActivity()
+                            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                            onBackClick()
+                        }) {
                             Icon(
                                 imageVector = Icons.Default.ArrowBack,
                                 contentDescription = "Go Back",
@@ -225,6 +250,7 @@ fun PlayerScreen(
                 )
             }
         },
+        contentWindowInsets = if (isFullScreen) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
         modifier = modifier.fillMaxSize()
     ) { innerPadding ->
         val scrollState = rememberScrollState()
@@ -232,11 +258,11 @@ fun PlayerScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .background(NearBlack)
-                .padding(if (isLandscape) PaddingValues(0.dp) else innerPadding)
+                .padding(if (isFullScreen) PaddingValues(0.dp) else innerPadding)
         ) {
             // --- VIDEO VIEWER VIEW ---
             Box(
-                modifier = if (isLandscape) {
+                modifier = if (isFullScreen) {
                     Modifier.fillMaxSize()
                 } else {
                     Modifier
@@ -269,6 +295,8 @@ fun PlayerScreen(
                                     customView = view
                                     customViewCallback = callback
                                     
+                                    isFullScreen = true
+                                    
                                     val activity = ctx.findActivity()
                                     val decorView = activity?.window?.decorView as? FrameLayout
                                     decorView?.addView(customView, FrameLayout.LayoutParams(
@@ -287,6 +315,8 @@ fun PlayerScreen(
                                     customView = null
                                     customViewCallback?.onCustomViewHidden()
                                     customViewCallback = null
+                                    
+                                    isFullScreen = false
                                 }
                             }
                             loadUrl(embedUrl)
@@ -299,9 +329,56 @@ fun PlayerScreen(
                     },
                     modifier = Modifier.fillMaxSize()
                 )
+
+                if (isFullScreen) {
+                    IconButton(
+                        onClick = {
+                            isFullScreen = false
+                        },
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(16.dp)
+                            .size(44.dp)
+                            .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                            .testTag("fullscreen_back_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ArrowBack,
+                            contentDescription = "Exit Full Screen",
+                            tint = Color.White
+                        )
+                    }
+                }
+
+                IconButton(
+                    onClick = {
+                        isFullScreen = !isFullScreen
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(16.dp)
+                        .size(44.dp)
+                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                        .testTag("fullscreen_toggle_button")
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .border(2.dp, Color.White, RoundedCornerShape(3.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isFullScreen) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(Color.White)
+                            )
+                        }
+                    }
+                }
             }
 
-            if (!isLandscape) {
+            if (!isFullScreen) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
