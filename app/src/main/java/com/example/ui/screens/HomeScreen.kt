@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -252,7 +253,8 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(24.dp))
                 RowHeader(
                     title = "Popular Celebs",
-                    hasSeeAll = false
+                    hasSeeAll = true,
+                    onSeeAll = { onSeeAllClick("popular_actors", -1, "Popular Celebs") }
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 LazyRow(
@@ -266,7 +268,11 @@ fun HomeScreen(
                                 .width(80.dp)
                                 .clickable { onActorClick(celeb.id) }
                         ) {
-                            val profileUrl = getProfileUrl(celeb.profile_path)
+                            val profileUrl = if (!celeb.profile_path.isNullOrBlank()) {
+                                "https://image.tmdb.org/t/p/w500/${celeb.profile_path.removePrefix("/")}"
+                            } else {
+                                null
+                            }
                             if (profileUrl != null) {
                                 AsyncImage(
                                     model = ImageRequest.Builder(LocalContext.current)
@@ -283,15 +289,33 @@ fun HomeScreen(
                                 Box(
                                     modifier = Modifier
                                         .size(64.dp)
-                                        .background(SurfaceDark, CircleShape),
+                                        .background(
+                                            Brush.verticalGradient(
+                                                colors = listOf(
+                                                    AmberGold.copy(alpha = 0.25f),
+                                                    SurfaceVariantDark
+                                                )
+                                            ),
+                                            CircleShape
+                                        )
+                                        .border(1.dp, AmberGold.copy(alpha = 0.4f), CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(
-                                        text = celeb.name.take(2).uppercase(),
-                                        color = TextWhite,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp
-                                    )
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            text = celeb.name.take(2).uppercase(),
+                                            color = AmberGold,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 14.sp
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "CELEB",
+                                            color = TextGray,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 7.sp
+                                        )
+                                    }
                                 }
                             }
                             Spacer(modifier = Modifier.height(6.dp))

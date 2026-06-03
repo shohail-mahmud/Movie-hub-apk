@@ -146,7 +146,7 @@ class MovieHubViewModel(application: Application) : AndroidViewModel(application
                         id = it.id,
                         name = it.name ?: "Unknown",
                         character = null,
-                        profile_path = it.poster_path, // TMDB mixes fields sometimes
+                        profile_path = it.profile_path ?: it.poster_path, // TMDB mixes fields sometimes
                         order = 0
                     )
                 }
@@ -216,11 +216,26 @@ class MovieHubViewModel(application: Application) : AndroidViewModel(application
                     "now_playing" -> apiService.getNowPlayingMovies(page)
                     "upcoming" -> apiService.getUpcomingMovies(page)
                     "by-genre" -> apiService.getMoviesByGenre(genreId, page = page)
+                    "popular_actors" -> apiService.getPopularActors(page)
                     else -> apiService.getPopularMovies(page)
                 }
                 
-                val inferredType = if (category == "trending_tv") "tv" else "movie"
-                _listItems.value = response.results.map { it.toCompactMedia(inferredType) }
+                val inferredType = if (category == "trending_tv") "tv" else if (category == "popular_actors") "actor" else "movie"
+                _listItems.value = response.results.map {
+                    if (category == "popular_actors") {
+                        CompactMedia(
+                            id = it.id,
+                            title = it.name ?: it.title ?: "Unknown",
+                            poster_path = it.profile_path ?: it.poster_path,
+                            vote_average = 0.0,
+                            vote_count = 0,
+                            release_date = null,
+                            media_type = "actor"
+                        )
+                    } else {
+                        it.toCompactMedia(inferredType)
+                    }
+                }
                 _listTotalPages.value = response.total_pages ?: 1
             } catch (e: Exception) {
                 e.printStackTrace()

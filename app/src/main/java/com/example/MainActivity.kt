@@ -251,7 +251,11 @@ fun MovieHubApp() {
                     genreName = genreName,
                     onBackClick = { navController.popBackStack() },
                     onMediaClick = { mType, mId ->
-                        navController.navigate("detail/$mType/$mId")
+                        if (mType == "actor" || mType == "person") {
+                            navController.navigate("actor/$mId")
+                        } else {
+                            navController.navigate("detail/$mType/$mId")
+                        }
                     }
                 )
             }

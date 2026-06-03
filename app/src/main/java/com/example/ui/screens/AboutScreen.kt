@@ -261,7 +261,7 @@ fun AboutScreen(
 
         // Footer Statement
         Text(
-            text = "MovieHub © 2106. Developed for movie buffs worldwide.",
+            text = "MovieHub © 2026. Developed for movie buffs worldwide.",
             color = TextWhite.copy(alpha = 0.4f),
             fontSize = 11.sp,
             textAlign = TextAlign.Center

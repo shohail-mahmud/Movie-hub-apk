@@ -38,7 +38,8 @@ data class TmdbMedia(
     val vote_count: Int?,
     val release_date: String?,
     val first_air_date: String?,
-    val media_type: String?
+    val media_type: String?,
+    val profile_path: String? = null
 ) {
     fun toCompactMedia(inferredType: String): CompactMedia {
         return CompactMedia(

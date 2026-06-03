@@ -337,10 +337,14 @@ fun MediaGridCard(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                val year = media.release_date?.take(4) ?: "N/A"
-                val typeText = if (media.media_type == "tv") "TV Show" else if (media.media_type == "person") "Actor" else "Movie"
+                val isActor = media.media_type == "actor" || media.media_type == "person"
+                val typeText = if (media.media_type == "tv") "TV Show" else if (isActor) "Actor" else "Movie"
+                val subtitleText = if (isActor) typeText else {
+                    val year = media.release_date?.take(4) ?: "N/A"
+                    "$typeText • $year"
+                }
                 Text(
-                    text = "$typeText • $year",
+                    text = subtitleText,
                     color = TextGray,
                     fontSize = 11.sp,
                     maxLines = 1,
